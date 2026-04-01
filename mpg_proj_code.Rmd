@@ -1,0 +1,239 @@
+---
+title: "Vehicle Fuel Efficiency — Multiple Linear Regression Analysis"
+author: "Brian Hoang"
+date: "2025-03-01"
+output: html_document
+---
+
+## Overview
+
+This analysis examines which vehicle characteristics are most strongly associated
+with fuel efficiency (MPG) using multiple linear regression. The dataset contains
+records on 392 vehicles produced between 1970 and 1982, sourced from the UCI MPG
+dataset. The primary predictors examined are vehicle weight, horsepower, and engine
+displacement.
+
+---
+
+## 1. Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+# Load required libraries
+library(tidyverse)  # data manipulation and piping
+library(ggplot2)    # visualizations
+```
+
+---
+
+## 2. Load and Inspect Data
+
+```{r load-data}
+# Load dataset directly from URL — no local file needed
+auto <- read.csv("https://raw.githubusercontent.com/mwaskom/seaborn-data/master/mpg.csv")
+
+# Preview the first few rows
+head(auto)
+
+# Check variable types and structure
+str(auto)
+
+# Check total number of observations
+nrow(auto)
+
+# Summary statistics for all variables
+summary(auto)
+```
+
+---
+
+## 3. Data Cleaning
+
+A small number of observations have missing values for horsepower. These are removed
+before modeling since horsepower is one of our primary predictors.
+
+```{r clean-data}
+# Drop rows with missing horsepower values
+auto_clean <- auto |>
+  drop_na(horsepower)
+
+# Confirm final sample size (expect 392)
+nrow(auto_clean)
+```
+
+---
+
+## 4. Exploratory Data Analysis
+
+Before fitting any models, scatterplots are used to visually assess the relationship
+between MPG and each potential predictor.
+
+```{r eda-plots, message=FALSE}
+# MPG vs Weight
+# Expect a negative relationship — heavier vehicles tend to use more fuel
+ggplot(auto_clean, aes(x = weight, y = mpg)) +
+  geom_point(color = "#2E86AB", alpha = 0.6, size = 2.5, shape = 16) +
+  geom_smooth(method = "lm", se = TRUE, color = "#E84855", fill = "#E84855",
+              alpha = 0.15, linewidth = 1.2) +
+  labs(
+    title    = "Fuel Efficiency vs Vehicle Weight",
+    subtitle = "Heavier vehicles tend to consume more fuel",
+    x        = "Weight (lbs)",
+    y        = "Miles Per Gallon (MPG)"
+  ) +
+  theme_classic()
+
+# MPG vs Horsepower
+# Expect a negative relationship — more powerful engines consume more fuel
+ggplot(auto_clean, aes(x = horsepower, y = mpg)) +
+  geom_point(color = "#3BB273", alpha = 0.6, size = 2.5, shape = 16) +
+  geom_smooth(method = "lm", se = TRUE, color = "#E84855", fill = "#E84855",
+              alpha = 0.15, linewidth = 1.2) +
+  labs(
+    title    = "Fuel Efficiency vs Horsepower",
+    subtitle = "Higher horsepower is associated with lower MPG",
+    x        = "Horsepower",
+    y        = "Miles Per Gallon (MPG)"
+  ) +
+  theme_classic()
+
+# MPG vs Displacement
+# Relationship looks weaker and less distinct compared to the other two predictors
+ggplot(auto_clean, aes(x = displacement, y = mpg)) +
+  geom_point(color = "#F4A261", alpha = 0.6, size = 2.5, shape = 16) +
+  geom_smooth(method = "lm", se = TRUE, color = "#E84855", fill = "#E84855",
+              alpha = 0.15, linewidth = 1.2) +
+  labs(
+    title    = "Fuel Efficiency vs Engine Displacement",
+    subtitle = "Larger engines are linked to lower fuel efficiency",
+    x        = "Displacement (cu. inches)",
+    y        = "Miles Per Gallon (MPG)"
+  ) +
+  theme_classic()
+```
+
+---
+
+## 5. Summary Statistics
+
+```{r summary-stats}
+# Summary statistics for the four key variables used in modeling
+summary(auto_clean[, c("mpg", "weight", "horsepower", "displacement")])
+```
+
+---
+
+## 6. Model Fitting
+
+Two nested models are fit and compared. Because weight, horsepower, and displacement
+tend to be correlated, including all three risks multicollinearity — where predictors
+explain overlapping variation in MPG.
+
+```{r full-model}
+# Full model: weight + horsepower + displacement
+model1 <- lm(mpg ~ weight + horsepower + displacement, data = auto_clean)
+
+summary(model1)
+```
+
+```{r reduced-model}
+# Reduced model: weight + horsepower only
+model2 <- lm(mpg ~ weight + horsepower, data = auto_clean)
+
+summary(model2)
+
+# ANOVA partial F-test comparing the two nested models
+# Tests whether adding displacement significantly improves model fit
+anova(model2, model1)
+```
+
+The partial F-test produces p = 0.381, indicating that displacement does not
+significantly improve the model once weight and horsepower are already included.
+The reduced model (model2) is selected as the final model.
+
+**Final model:** `mpg = 45.64 - 0.00579(weight) - 0.0473(horsepower)`
+
+---
+
+## 7. Model Diagnostics
+
+Four standard diagnostic plots are used to check whether regression assumptions
+are reasonably satisfied.
+
+```{r diagnostics, message=FALSE}
+library(patchwork)
+
+# Build a dataframe of diagnostic values from the final model
+df_diag <- data.frame(
+  fitted    = fitted(model2),       # fitted (predicted) values
+  residuals = residuals(model2),    # raw residuals
+  std_resid = rstandard(model2),    # standardized residuals
+  sqrt_std  = sqrt(abs(rstandard(model2))),  # for scale-location plot
+  leverage  = hatvalues(model2)     # leverage values (hat matrix diagonal)
+)
+
+# Plot 1: Residuals vs Fitted
+# Checks linearity — no clear pattern means assumption is reasonable
+p1 <- ggplot(df_diag, aes(fitted, residuals)) +
+  geom_point(alpha = 0.4, size = 1.5, color = "#2E86AB") +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  geom_smooth(se = FALSE, color = "red", linewidth = 0.8) +
+  coord_cartesian(ylim = c(-15, 15)) +  # zoom in without removing data points
+  labs(title = "Residuals vs Fitted", x = "Fitted values", y = "Residuals") +
+  theme_classic()
+
+# Plot 2: Q-Q Plot
+# Checks normality of residuals — points close to the line indicate normality
+p2 <- ggplot(df_diag, aes(sample = std_resid)) +
+  stat_qq(alpha = 0.4, size = 1.5, color = "#3BB273") +
+  stat_qq_line(color = "red", linetype = "dashed") +
+  labs(title = "Q-Q Residuals", x = "Theoretical Quantiles",
+       y = "Standardized Residuals") +
+  theme_classic()
+
+# Plot 3: Scale-Location
+# Checks constant variance (homoscedasticity) — flat trend line is ideal
+p3 <- ggplot(df_diag, aes(fitted, sqrt_std)) +
+  geom_point(alpha = 0.4, size = 1.5, color = "#F4A261") +
+  geom_smooth(se = FALSE, color = "red", linewidth = 0.8) +
+  labs(title = "Scale-Location", x = "Fitted values",
+       y = "√|Standardized Residuals|") +
+  theme_classic()
+
+# Plot 4: Residuals vs Leverage
+# Identifies influential observations — high leverage + large residual is concerning
+p4 <- ggplot(df_diag, aes(leverage, std_resid)) +
+  geom_point(alpha = 0.4, size = 1.5, color = "#9B59B6") +
+  geom_hline(yintercept = 0, color = "grey50", linetype = "dashed") +
+  coord_cartesian(xlim = c(0, 0.06)) +
+  labs(title = "Residuals vs Leverage", x = "Leverage",
+       y = "Standardized Residuals") +
+  theme_classic()
+
+# Display all four plots in a 2x2 grid
+(p1 + p2) / (p3 + p4)
+```
+
+---
+
+## 8. Cook's Distance
+
+Cook's distance measures how much influence a single observation has on the fitted
+model. Values above 0.5 are generally considered influential.
+
+```{r cooks-distance}
+# Maximum Cook's distance across all observations
+max(cooks.distance(model2))
+
+# Well below the 0.5 threshold — no single observation is disproportionately influential
+```
+
+---
+
+## Results Summary
+
+- **Final model:** `mpg = 45.64 - 0.00579(weight) - 0.0473(horsepower)`
+- **R² = 0.706** — the model explains approximately 70% of variation in MPG
+- Both weight and horsepower are significant at p < 0.001
+- Displacement was excluded based on the partial F-test (p = 0.381)
+- Max Cook's distance = 0.037, well below the 0.5 threshold
+- Mild heteroscedasticity detected but does not substantially affect interpretation
